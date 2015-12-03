@@ -6,7 +6,10 @@ find_package(catkin REQUIRED COMPONENTS
   sensor_msgs
   std_msgs
   message_generation
+  nodelet
 )
+
+find_package(Boost REQUIRED COMPONENTS thread system)
 
 ## Generate messages in the 'msg' folder
 add_message_files(
@@ -49,9 +52,9 @@ generate_messages(
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
   INCLUDE_DIRS include
-#  LIBRARIES robotis_controller
+  LIBRARIES robotis_controller nodelet_framework
 #  CATKIN_DEPENDS roscpp sensor_msgs std_msgs
-  CATKIN_DEPENDS roscpp sensor_msgs std_msgs
+  CATKIN_DEPENDS roscpp sensor_msgs std_msgs nodelet
 #  DEPENDS system_lib
 )
 
@@ -78,6 +81,18 @@ add_library(robotis_controller
   src/handler/PacketProtocol2.cpp
 )
 
+add_library(nodelet_framework
+  src/RobotisController.cpp
+  src/device/GenericDevice.cpp
+  src/handler/PortHandler.cpp
+  src/handler/GroupHandler.cpp
+  src/handler/PacketHandler.cpp
+  src/handler/PacketProtocol1.cpp
+  src/handler/PacketProtocol2.cpp
+  src/RobotisManager.cpp
+  src/RobotisManager_nodelet.cpp
+)
+
 ## Declare a cpp executable
 add_executable(robotis_manager
   src/RobotisController.cpp
@@ -88,6 +103,7 @@ add_executable(robotis_manager
   src/handler/PacketProtocol1.cpp
   src/handler/PacketProtocol2.cpp
   src/RobotisManager.cpp
+  src/RobotisManager_main.cpp
 )
 
 ## Add cmake target dependencies of the executable/library
@@ -101,4 +117,9 @@ target_link_libraries(robotis_controller
 )
 target_link_libraries(robotis_manager
   ${catkin_LIBRARIES}
+  ${Boost_LIBRARIES}
+)
+target_link_libraries(nodelet_framework
+  ${catkin_LIBRARIES}
+  ${Boost_LIBRARIES}
 )

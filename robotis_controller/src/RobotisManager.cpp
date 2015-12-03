@@ -5,34 +5,41 @@
  *      Author: zerom
  */
 
-
-#include <ros/ros.h>
-
-#include <unistd.h>
-#include <vector>
-#include <std_msgs/Bool.h>
-#include <sensor_msgs/JointState.h>
-
-#include "robotis_controller/ControlWrite.h"
-#include "robotis_controller/ControlTorque.h"
-#include "robotis_controller/PublishPosition.h"
-
-#include "../../robotis_controller/include/handler/GroupHandler.h"
-#include "../../robotis_controller/include/RobotisController.h"
+#include "robotis_controller/RobotisManager.h"
 
 using namespace ROBOTIS;
 
-RobotisController   *controller = new RobotisController();
-GroupHandler        grp_handler(controller);
+namespace robotis_framework
+{
 
-pthread_mutex_t     mutex = PTHREAD_MUTEX_INITIALIZER;
-int                 syncwrite_addr;
-int                 syncwrite_data_length;
-std::vector <unsigned char> syncwrite_param;
+RobotisManager::RobotisManager(ros::NodeHandle nh, ros::NodeHandle param_nh)
+    : nh_(nh), param_nh_(param_nh), controller()
+{
 
-std::vector <int>           publish_list;
+    grp_handler.reset(new GroupHandler(controller));
 
-int get_id_from_name(const char* name)
+    // mutex = PTHREAD_MUTEX_INITIALIZER;
+
+    publish_position_sub    = nh_.subscribe("/publish_position", 10, &RobotisManager::publish_position_callback, this);
+    control_write_sub       = nh_.subscribe("/control_write", 10, &RobotisManager::control_write_callback, this);
+    control_torque_sub      = nh_.subscribe("/control_torque", 10, &RobotisManager::control_torque_callback, this);
+
+    std::string topic_name;
+    if(param_nh_.getParam("subscribe_joint_topic_name", topic_name) == true)
+        joint_states_sub = nh_.subscribe(topic_name, 10, &RobotisManager::joint_states_callback, this);
+    else
+        joint_states_sub = nh_.subscribe("/controller_joint_states", 10, &RobotisManager::joint_states_callback, this);
+
+    //pthread_create(&comm_thread, 0, &RobotisManager::comm_thread_proc, this);
+    comm_thread = boost::thread(boost::bind(&RobotisManager::comm_thread_proc, this));
+}
+
+RobotisManager::~RobotisManager()
+{
+    comm_thread.join();
+}
+
+int RobotisManager::get_id_from_name(const char* name)
 {
     int id = -1;
     for(int i = 0; i < controller->idList.size(); i++)
@@ -44,7 +51,7 @@ int get_id_from_name(const char* name)
     return -1;
 }
 
-void publish_position_callback(const robotis_controller::PublishPosition::ConstPtr& msg)
+void RobotisManager::publish_position_callback(const robotis_controller::PublishPosition::ConstPtr& msg)
 {
     if(msg->name.size() == 0 || msg->name.size() != msg->publish.size())
         return;
@@ -56,12 +63,12 @@ void publish_position_callback(const robotis_controller::PublishPosition::ConstP
             continue;
 
         if(msg->publish[i] == true) {
-            grp_handler.pushBulkRead(id, controller->getDevice(id)->ADDR_PRESENT_POSITION);
+            grp_handler->pushBulkRead(id, controller->getDevice(id)->ADDR_PRESENT_POSITION);
             if ( std::find(publish_list.begin(), publish_list.end(), id) == publish_list.end() )
                 publish_list.push_back(get_id_from_name(msg->name[i].c_str()));
         }
         else {
-            grp_handler.deleteBulkRead(id);
+            grp_handler->deleteBulkRead(id);
             std::vector<int>::iterator iter = std::find(publish_list.begin(), publish_list.end(), id);
             if(iter != publish_list.end())
                 publish_list.erase(iter);
@@ -69,14 +76,15 @@ void publish_position_callback(const robotis_controller::PublishPosition::ConstP
     }
 }
 
-void joint_states_callback(const sensor_msgs::JointState::ConstPtr& msg)
+void RobotisManager::joint_states_callback(const sensor_msgs::JointState::ConstPtr& msg)
 {
     int n = 0, id = -1;
 
     if(msg->name.size() == 0 || msg->name.size() != msg->position.size())
         return;
 
-    pthread_mutex_lock(&mutex);
+    //pthread_mutex_lock(&mutex);
+    mutex.lock();
     syncwrite_param.clear();
     for(unsigned int idx = 0; idx < msg->name.size(); idx++)
     {
@@ -102,35 +110,37 @@ void joint_states_callback(const sensor_msgs::JointState::ConstPtr& msg)
             }
         }
     }
-    pthread_mutex_unlock(&mutex);
+    // pthread_mutex_unlock(&mutex);
+    mutex.unlock();
 }
 
-void control_write_callback(const robotis_controller::ControlWrite::ConstPtr& msg)
+void RobotisManager::control_write_callback(const robotis_controller::ControlWrite::ConstPtr& msg)
 {
     switch(msg->length)
     {
-    case 1:
-        controller->write(msg->id, msg->addr, msg->value, LENGTH_1BYTE, 0);
-        break;
-    case 2:
-        controller->write(msg->id, msg->addr, msg->value, LENGTH_2BYTE, 0);
-        break;
-    case 4:
-        controller->write(msg->id, msg->addr, msg->value, LENGTH_4BYTE, 0);
-        break;
-    default:
-        break;
+        case 1:
+            controller->write(msg->id, msg->addr, msg->value, LENGTH_1BYTE, 0);
+            break;
+        case 2:
+            controller->write(msg->id, msg->addr, msg->value, LENGTH_2BYTE, 0);
+            break;
+        case 4:
+            controller->write(msg->id, msg->addr, msg->value, LENGTH_4BYTE, 0);
+            break;
+        default:
+            break;
     }
 }
 
-void control_torque_callback(const robotis_controller::ControlTorque::ConstPtr& msg)
+void RobotisManager::control_torque_callback(const robotis_controller::ControlTorque::ConstPtr& msg)
 {
     int n = 0, id = -1;
 
     if(msg->name.size() == 0 || msg->name.size() != msg->enable.size())
         return;
 
-    pthread_mutex_lock(&mutex);
+    // pthread_mutex_lock(&mutex);
+    mutex.lock();
     syncwrite_param.clear();
     for(int i = 0; i < msg->name.size(); i++)
     {
@@ -147,27 +157,28 @@ void control_torque_callback(const robotis_controller::ControlTorque::ConstPtr& 
                 syncwrite_param[n++]  = 0;
         }
     }
-    pthread_mutex_unlock(&mutex);
+    // pthread_mutex_unlock(&mutex);
+    mutex.unlock();
 }
 
-void *comm_thread_proc(void *param)
+void RobotisManager::comm_thread_proc()
 {
-    ros::NodeHandle nh("~");
+    // ros::NodeHandle nh("~");
 
     ros::Publisher joint_states_pub;
     std::string topic_name;
-    if(nh.getParam("publish_joint_topic_name", topic_name) == true)
-        joint_states_pub = nh.advertise<sensor_msgs::JointState>(topic_name, 1);
+    if(param_nh_.getParam("publish_joint_topic_name", topic_name) == true)
+        joint_states_pub = nh_.advertise<sensor_msgs::JointState>(topic_name, 1);
     else
-        joint_states_pub = nh.advertise<sensor_msgs::JointState>("/robot_joint_states", 1);
+        joint_states_pub = nh_.advertise<sensor_msgs::JointState>("/robot_joint_states", 1);
 
-    ros::Publisher manager_ready_pub = nh.advertise<std_msgs::Bool>("/manager_ready", 10, true);
+    ros::Publisher manager_ready_pub = nh_.advertise<std_msgs::Bool>("/manager_ready", 10, true);
 
     // check .launch file parameter
     if(controller->initialize() == false)
     {
         ROS_ERROR("robotis_controller initialize failed");
-        return 0;
+        return ;
     }
 
     std_msgs::Bool ready;
@@ -177,12 +188,14 @@ void *comm_thread_proc(void *param)
     while(ros::ok())
     {
         // Run BulkRead
-        grp_handler.runBulkRead();
+        grp_handler->runBulkRead();
 
         if(syncwrite_param.size() > 0) {
-            pthread_mutex_lock(&mutex);
-            int r = grp_handler.syncWrite(syncwrite_addr, syncwrite_data_length, &syncwrite_param[0], syncwrite_param.size());
-            pthread_mutex_unlock(&mutex);
+            //pthread_mutex_lock(&mutex);
+            mutex.lock();
+            int r = grp_handler->syncWrite(syncwrite_addr, syncwrite_data_length, &syncwrite_param[0], syncwrite_param.size());
+            // pthread_mutex_unlock(&mutex);
+            mutex.unlock();
         }
         syncwrite_param.clear();
 
@@ -194,7 +207,7 @@ void *comm_thread_proc(void *param)
             {
                 int     _pos    = 0;
                 int     _id     = publish_list[i];
-                if(grp_handler.getReadData(_id, controller->getDevice(_id)->ADDR_PRESENT_POSITION, (long int*)&_pos) == true)
+                if(grp_handler->getReadData(_id, controller->getDevice(_id)->ADDR_PRESENT_POSITION, (long int*)&_pos) == true)
                 {
                     joint_states.name.push_back(controller->getDevice(_id)->getJointName());
                     joint_states.position.push_back(controller->getDevice(_id)->value2Rad(_pos));
@@ -206,33 +219,7 @@ void *comm_thread_proc(void *param)
 
         ros::spinOnce();
     }
-    return 0;
+    return;
 }
 
-int main(int argc, char **argv)
-{
-    ros::init(argc, argv, "robotis_manager");
-
-    ros::NodeHandle nh("~");
-
-    ros::Subscriber publish_position_sub    = nh.subscribe("/publish_position", 10, publish_position_callback);
-    ros::Subscriber control_write_sub       = nh.subscribe("/control_write", 10, control_write_callback);
-    ros::Subscriber control_torque_sub      = nh.subscribe("/control_torque", 10, control_torque_callback);
-
-    ros::Subscriber joint_states_sub;
-    std::string topic_name;
-    if(nh.getParam("subscribe_joint_topic_name", topic_name) == true)
-        joint_states_sub = nh.subscribe(topic_name, 10, joint_states_callback);
-    else
-        joint_states_sub = nh.subscribe("/controller_joint_states", 10, joint_states_callback);
-
-    pthread_t comm_thread;
-    if(pthread_create(&comm_thread, 0, comm_thread_proc, 0) != 0)
-        exit(-1);
-
-    while(ros::ok())
-    { }
-
-    return 0;
 }
-

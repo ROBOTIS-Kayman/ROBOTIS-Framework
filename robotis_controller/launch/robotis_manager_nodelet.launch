@@ -1,0 +1,14 @@
+
+<launch>
+    <node name="robotis_manager" pkg="robotis_controller" type="robotis_manager" output="screen">
+        <rosparam command="load" file="$(find robotis_example)/launch/ROBOTIS-OP2.yaml" />
+    </node>
+</launch> 
+
+<launch>
+  <node pkg="nodelet" type="nodelet" name="standalone_nodelet"  args="manager" output="screen"/>
+
+  <node pkg="nodelet" type="nodelet" name="RobotisFrameworkNodelet" args="load robotis_framework/RobotisManagerNodelet standalone_nodelet" output="screen">
+    <rosparam command="load" file="$(find robotis_example)/launch/ROBOTIS-OP2.yaml" />
+  </node>                 
+</launch>
