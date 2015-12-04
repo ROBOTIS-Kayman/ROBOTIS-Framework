@@ -13,9 +13,9 @@ namespace robotis_framework
 {
 
 RobotisManager::RobotisManager(ros::NodeHandle nh, ros::NodeHandle param_nh)
-    : nh_(nh), param_nh_(param_nh), controller()
+    : nh_(nh), param_nh_(param_nh)
 {
-
+    controller = new RobotisController();
     grp_handler.reset(new GroupHandler(controller));
 
     // mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -85,6 +85,9 @@ void RobotisManager::joint_states_callback(const sensor_msgs::JointState::ConstP
 
     //pthread_mutex_lock(&mutex);
     mutex.lock();
+    ros::Duration _dur = ros::Time::now() - msg->header.stamp;
+    ROS_INFO_STREAM("received | " << _dur);
+
     syncwrite_param.clear();
     for(unsigned int idx = 0; idx < msg->name.size(); idx++)
     {
@@ -175,7 +178,7 @@ void RobotisManager::comm_thread_proc()
     ros::Publisher manager_ready_pub = nh_.advertise<std_msgs::Bool>("/manager_ready", 10, true);
 
     // check .launch file parameter
-    if(controller->initialize() == false)
+	if (controller->initialize(param_nh_) == false)
     {
         ROS_ERROR("robotis_controller initialize failed");
         return ;
@@ -191,11 +194,13 @@ void RobotisManager::comm_thread_proc()
         grp_handler->runBulkRead();
 
         if(syncwrite_param.size() > 0) {
+            // ROS_INFO("start syncwrite");
             //pthread_mutex_lock(&mutex);
             mutex.lock();
             int r = grp_handler->syncWrite(syncwrite_addr, syncwrite_data_length, &syncwrite_param[0], syncwrite_param.size());
             // pthread_mutex_unlock(&mutex);
             mutex.unlock();
+            // ROS_INFO("end syncwrite");
         }
         syncwrite_param.clear();
 

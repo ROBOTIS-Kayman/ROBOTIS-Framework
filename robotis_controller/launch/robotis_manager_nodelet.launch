@@ -1,14 +1,8 @@
-
 <launch>
-    <node name="robotis_manager" pkg="robotis_controller" type="robotis_manager" output="screen">
+    <node name="robotis_nodelet_manager" pkg="nodelet" type="nodelet" args="manager" />
+    <node name="robotis_manager_nodelet" pkg="nodelet" type="nodelet" args="load robotis_controller/RobotisManagerNodelet robotis_nodelet_manager" output="screen">
         <rosparam command="load" file="$(find robotis_example)/launch/ROBOTIS-OP2.yaml" />
+        <rosparam param="publish_joint_topic_name">"/robot_joint_states"</rosparam>
+        <rosparam param="subscribe_joint_topic_name">"/controller_joint_states"</rosparam>
     </node>
-</launch> 
-
-<launch>
-  <node pkg="nodelet" type="nodelet" name="standalone_nodelet"  args="manager" output="screen"/>
-
-  <node pkg="nodelet" type="nodelet" name="RobotisFrameworkNodelet" args="load robotis_framework/RobotisManagerNodelet standalone_nodelet" output="screen">
-    <rosparam command="load" file="$(find robotis_example)/launch/ROBOTIS-OP2.yaml" />
-  </node>                 
 </launch>

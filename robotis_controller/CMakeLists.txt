@@ -81,7 +81,7 @@ add_library(robotis_controller
   src/handler/PacketProtocol2.cpp
 )
 
-add_library(nodelet_framework
+add_library(RobotisManagerNodelet
   src/RobotisController.cpp
   src/device/GenericDevice.cpp
   src/handler/PortHandler.cpp
@@ -119,7 +119,7 @@ target_link_libraries(robotis_manager
   ${catkin_LIBRARIES}
   ${Boost_LIBRARIES}
 )
-target_link_libraries(nodelet_framework
+target_link_libraries(RobotisManagerNodelet
   ${catkin_LIBRARIES}
   ${Boost_LIBRARIES}
 )

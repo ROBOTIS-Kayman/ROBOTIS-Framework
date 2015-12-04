@@ -24,6 +24,7 @@
 
 
 #include <vector>
+#include <ros/ros.h>
 
 #include "device/GenericDevice.h"
 #include "handler/PacketHandler.h"
@@ -46,6 +47,7 @@ public:
     virtual ~RobotisController();
 
     bool    initialize();
+    bool    initialize(ros::NodeHandle nh);
 
     bool    addSerialPort(const char* port_name, int baudrate = PortHandler::DEFAULT_BAUDRATE);
     void    addDevice(PortHandler* port, int id, const char* joint_name, const char* model, float protocol_ver = 2.0);

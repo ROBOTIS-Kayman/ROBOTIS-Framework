@@ -39,6 +39,11 @@ RobotisController::~RobotisController()
 bool RobotisController::initialize()
 {
     ros::NodeHandle nh("~");
+    return initialize(nh);
+}
+
+bool RobotisController::initialize(ros::NodeHandle nh)
+{
 
     bool result = false;
     int port_num;
