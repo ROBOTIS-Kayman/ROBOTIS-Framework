@@ -52,7 +52,7 @@ generate_messages(
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
   INCLUDE_DIRS include
-  LIBRARIES robotis_controller nodelet_framework
+  LIBRARIES robotis_controller
 #  CATKIN_DEPENDS roscpp sensor_msgs std_msgs
   CATKIN_DEPENDS roscpp sensor_msgs std_msgs nodelet
 #  DEPENDS system_lib
