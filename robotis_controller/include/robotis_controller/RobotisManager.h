@@ -14,6 +14,8 @@
 
 #include <boost/thread.hpp>
 
+#include <ros/callback_queue.h>
+
 using namespace ROBOTIS;
 
 namespace robotis_framework
@@ -27,6 +29,7 @@ public:
     ~RobotisManager();
     void onInit();
     void comm_thread_proc();
+    void ros_thread_proc();
 
 protected:
     ros::NodeHandle nh_, param_nh_;
@@ -50,6 +53,9 @@ protected:
 
     // pthread_t comm_thread;
     boost::thread comm_thread;
+    boost::thread ros_thread;
+
+    ros::CallbackQueue my_queue;
 
     int get_id_from_name(const char* name);
     void publish_position_callback(const robotis_controller::PublishPosition::ConstPtr& msg);
