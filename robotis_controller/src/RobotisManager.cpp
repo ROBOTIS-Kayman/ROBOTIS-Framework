@@ -112,7 +112,7 @@ void RobotisManager::joint_states_callback(const sensor_msgs::JointState::ConstP
 	mutex.lock();
 	// ros::Duration _dur = ros::Time::now() - msg->header.stamp;
 	// ROS_INFO_STREAM("m_received | " << _dur);
-
+    msg_seq_index = msg->header.seq;
 	syncwrite_param.clear();
 	for(unsigned int idx = 0; idx < msg->name.size(); idx++)
 	{
@@ -216,13 +216,11 @@ void RobotisManager::comm_thread_proc()
 	ros::Rate _loop_hz(125);	// 8ms
 
 	ros::Time _time = ros::Time::now();
+    int _seq = 0;
 
 	while(ros::ok())
-	{
-		ros::Time _now = ros::Time::now();
-		ros::Duration _dur = _now - _time;
-		ROS_INFO_STREAM("loop_rate " << _dur);
-		_time = _now;
+    {
+        int _msg_seq = 0;
 		// Run BulkRead
 		grp_handler->runBulkRead();
 
@@ -231,6 +229,8 @@ void RobotisManager::comm_thread_proc()
 			mutex.lock();
 			int r = grp_handler->syncWrite(syncwrite_addr, syncwrite_data_length, &syncwrite_param[0], syncwrite_param.size());
 			// pthread_mutex_unlock(&mutex);
+            _msg_seq = msg_seq_index - _seq;
+            _seq = msg_seq_index;
 			mutex.unlock();
 		}
 		syncwrite_param.clear();
@@ -255,7 +255,15 @@ void RobotisManager::comm_thread_proc()
 
 		ros::spinOnce();
 		_loop_hz.sleep();
+
+        ros::Time _now = ros::Time::now();
+        ros::Duration _dur = _now - _time;
+
+        // log
+        ROS_INFO_STREAM("loop_rate " << _dur << " | " << _msg_seq);
+        _time = _now;
 	}
+
 	ROS_INFO("Terminated ROS");
 	return;
 }

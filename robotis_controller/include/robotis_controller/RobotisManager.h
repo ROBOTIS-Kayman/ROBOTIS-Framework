@@ -40,6 +40,7 @@ protected:
     //pthread_mutex_t     mutex = PTHREAD_MUTEX_INITIALIZER;
     boost::mutex mutex;
 
+    int msg_seq_index;
     int                 syncwrite_addr;
     int                 syncwrite_data_length;
     std::vector <unsigned char> syncwrite_param;
