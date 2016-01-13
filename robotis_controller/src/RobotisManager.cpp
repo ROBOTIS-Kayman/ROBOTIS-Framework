@@ -17,6 +17,7 @@ RobotisManager::RobotisManager(ros::NodeHandle nh, ros::NodeHandle param_nh)
 {
 	controller = new RobotisController();
 	grp_handler.reset(new GroupHandler(controller));
+	tf_broadcaster_.reset(new tf::TransformBroadcaster());
 
 	// call queue
 	// nh_.setCallbackQueue(&my_queue);
@@ -76,6 +77,80 @@ int RobotisManager::get_id_from_name(const char* name)
 	return -1;
 }
 
+void RobotisManager::publish_localization_tf()
+{
+	geometry_msgs::TransformStamped _transform;
+
+	_transform.header.stamp = imu_data.header.stamp;
+	_transform.header.frame_id = "map";
+	_transform.child_frame_id = "base_link";
+	_transform.transform.rotation.w = imu_data.orientation.w;
+	//ROS and ROBITIS x and y frame definitions deviate by 90 degree around z axis
+	_transform.transform.rotation.x = imu_data.orientation.x;
+	_transform.transform.rotation.y = imu_data.orientation.y;
+	_transform.transform.rotation.z = imu_data.orientation.z;
+	tf_broadcaster_->sendTransform(_transform);
+}
+
+void RobotisManager::publish_imu(ros::Publisher &pub)
+{
+	imu_data.header.stamp = ros::Time::now();
+	imu_data.header.frame_id = "body_link";
+
+	//	double imu_orientation[4];
+	double imu_angular_velocity[3];
+	double imu_linear_acceleration[3];
+	double filter_alpha = 0.4;
+
+	//in rad/s
+	long int _value = 0;
+	int _arrd_length = 2;
+	grp_handler->getReadData(CM730::ID_CM, CM730::P_GYRO_X_L, (long int*)&_value, _arrd_length);
+	imu_angular_velocity[0] = _value;
+	grp_handler->getReadData(CM730::ID_CM, CM730::P_GYRO_Y_L, (long int*)&_value, _arrd_length);
+	imu_angular_velocity[1] = _value;
+	grp_handler->getReadData(CM730::ID_CM, CM730::P_GYRO_Z_L, (long int*)&_value, _arrd_length);
+	imu_angular_velocity[2] = _value;
+	imu_data.angular_velocity.x = lowPassFilter(filter_alpha, (imu_angular_velocity[1] - 512) * 1600.0 * M_PI / (512.0 * 180.0), imu_data.angular_velocity.x);
+	imu_data.angular_velocity.y = lowPassFilter(filter_alpha, (imu_angular_velocity[0] - 512) * 1600.0 * M_PI / (512.0 * 180.0), imu_data.angular_velocity.y);
+	imu_data.angular_velocity.z = lowPassFilter(filter_alpha, (imu_angular_velocity[2] - 512) * 1600.0 * M_PI / (512.0 * 180.0), imu_data.angular_velocity.z);
+	// ROS_INFO("angular velocity : %f, %f, %f", imu_angular_velocity[0], imu_angular_velocity[1], imu_angular_velocity[2]);
+
+	//in m/s^2
+	double _const = 1;
+	grp_handler->getReadData(CM730::ID_CM, CM730::P_ACCEL_X_L, (long int*)&_value, _arrd_length);
+	imu_linear_acceleration[0] = _value;
+	grp_handler->getReadData(CM730::ID_CM, CM730::P_ACCEL_Y_L, (long int*)&_value, _arrd_length);
+	imu_linear_acceleration[1] = _value;
+	grp_handler->getReadData(CM730::ID_CM, CM730::P_ACCEL_Z_L, (long int*)&_value, _arrd_length);
+	imu_linear_acceleration[2] = _value;
+	imu_data.linear_acceleration.x = lowPassFilter(filter_alpha, (imu_linear_acceleration[1] - 512) * G_ACC * _const * 4.0 / 512.0, imu_data.linear_acceleration.x);
+	imu_data.linear_acceleration.y = lowPassFilter(filter_alpha, (imu_linear_acceleration[0] - 512) * G_ACC * _const * 4.0 / 512.0, imu_data.linear_acceleration.y);
+	imu_data.linear_acceleration.z = lowPassFilter(filter_alpha, (imu_linear_acceleration[2] - 512) * G_ACC * _const * 4.0 / 512.0, imu_data.linear_acceleration.z);
+	// ROS_INFO("linear_acceleration : %f, %f, %f", imu_linear_acceleration[0], imu_linear_acceleration[1], imu_linear_acceleration[2]);
+
+	//Estimation of roll and pitch based on accelometer data, see http://theccontinuum.com/2012/09/24/arduino-imu-pitch-roll-from-accelerometer/
+	double sign = copysignf(1.0,  imu_data.linear_acceleration.z/G_ACC);
+	double roll = atan2( imu_data.linear_acceleration.y/G_ACC, sign * sqrt( imu_data.linear_acceleration.x/G_ACC* imu_data.linear_acceleration.x/G_ACC +  imu_data.linear_acceleration.z/G_ACC* imu_data.linear_acceleration.z/G_ACC));
+	double pitch = -atan2( imu_data.linear_acceleration.x/G_ACC, sqrt( imu_data.linear_acceleration.y/G_ACC* imu_data.linear_acceleration.y/G_ACC +  imu_data.linear_acceleration.z/G_ACC* imu_data.linear_acceleration.z/G_ACC));
+	double yaw = 0.0;
+
+	tf2::Quaternion imu_orient;
+	imu_orient.setRPY(roll, pitch, yaw);
+
+	imu_data.orientation.x = imu_orient.getX();
+	imu_data.orientation.y = imu_orient.getY();
+	imu_data.orientation.z = imu_orient.getZ();
+	imu_data.orientation.w = imu_orient.getW();
+
+	pub.publish(imu_data);
+}
+
+double RobotisManager::lowPassFilter(double alpha, double x_new, double x_old)
+{
+	return alpha*x_new + (1.0-alpha)*x_old;
+}
+
 void RobotisManager::publish_position_callback(const robotis_controller::PublishPosition::ConstPtr& msg)
 {
 	if(msg->name.size() == 0 || msg->name.size() != msg->publish.size())
@@ -112,7 +187,7 @@ void RobotisManager::joint_states_callback(const sensor_msgs::JointState::ConstP
 	mutex.lock();
 	// ros::Duration _dur = ros::Time::now() - msg->header.stamp;
 	// ROS_INFO_STREAM("m_received | " << _dur);
-    msg_seq_index = msg->header.seq;
+	msg_seq_index = msg->header.seq;
 	syncwrite_param.clear();
 	for(unsigned int idx = 0; idx < msg->name.size(); idx++)
 	{
@@ -200,6 +275,8 @@ void RobotisManager::comm_thread_proc()
 	else
 		joint_states_pub = nh_.advertise<sensor_msgs::JointState>("/robot_joint_states", 1);
 
+	ros::Publisher _imu_pub      = nh_.advertise<sensor_msgs::Imu>("/robot_imu_data", 1);
+
 	ros::Publisher manager_ready_pub = nh_.advertise<std_msgs::Bool>("/manager_ready", 10, true);
 
 	// check .launch file parameter
@@ -216,11 +293,20 @@ void RobotisManager::comm_thread_proc()
 	ros::Rate _loop_hz(125);	// 8ms
 
 	ros::Time _time = ros::Time::now();
-    int _seq = 0;
+	int _seq = 0;
+
+	// gyro bulkread
+	int _arrd_length = 2;
+	grp_handler->pushBulkRead(CM730::ID_CM, CM730::P_GYRO_Z_L, 12);
 
 	while(ros::ok())
-    {
-        int _msg_seq = 0;
+	{
+		ros::Time _now = ros::Time::now();
+		ros::Duration _dur = _now - _time;
+		_time = _now;
+
+		int _msg_seq = 0;
+
 		// Run BulkRead
 		grp_handler->runBulkRead();
 
@@ -228,10 +314,15 @@ void RobotisManager::comm_thread_proc()
 			//pthread_mutex_lock(&mutex);
 			mutex.lock();
 			int r = grp_handler->syncWrite(syncwrite_addr, syncwrite_data_length, &syncwrite_param[0], syncwrite_param.size());
-			// pthread_mutex_unlock(&mutex);
-            _msg_seq = msg_seq_index - _seq;
+
+			/*
+            // log
+			_msg_seq = msg_seq_index - _seq;
             _seq = msg_seq_index;
+            ROS_INFO_STREAM("loop_rate " << _dur << " | " << _msg_seq);
+			 */
 			mutex.unlock();
+			// pthread_mutex_unlock(&mutex);
 		}
 		syncwrite_param.clear();
 
@@ -253,15 +344,64 @@ void RobotisManager::comm_thread_proc()
 			joint_states_pub.publish(joint_states);
 		}
 
+		// publish imu data
+
+		//	double imu_orientation[4];
+		//		int imu_angular_velocity[3];
+		//		int imu_linear_acceleration[3];
+		//		double filter_alpha = 0.5;
+		//
+		//		//in rad/s
+		//		long int _value = 0;
+		//		int _arrd_length = 2;
+		//		grp_handler->getReadData(CM730::ID_CM, CM730::P_GYRO_X_L, &_value, _arrd_length);
+		//		imu_angular_velocity[0] = _value;
+		//		imu_data.angular_velocity.x = lowPassFilter(filter_alpha, (imu_angular_velocity[0] - 512) * 1600.0 * M_PI / (512.0 * 180.0), imu_data.angular_velocity.x);
+		//		grp_handler->getReadData(CM730::ID_CM, CM730::P_GYRO_Y_L, &_value, _arrd_length);
+		//		imu_angular_velocity[1] = _value;
+		//		imu_data.angular_velocity.y = lowPassFilter(filter_alpha, (imu_angular_velocity[1] - 512) * 1600.0 * M_PI / (512.0 * 180.0), imu_data.angular_velocity.y);
+		//		grp_handler->getReadData(CM730::ID_CM, CM730::P_GYRO_Z_L, &_value, _arrd_length);
+		//		imu_angular_velocity[2] = _value;
+		//		imu_data.angular_velocity.z = lowPassFilter(filter_alpha, (imu_angular_velocity[2] - 512) * 1600.0 * M_PI / (512.0 * 180.0), imu_data.angular_velocity.z);
+		//		// ROS_INFO("angular velocity : %f, %f, %f", imu_angular_velocity[0], imu_angular_velocity[1], imu_angular_velocity[2]);
+		//
+		//		//in m/s^2
+		//		double _const = 1;
+		//		grp_handler->getReadData(CM730::ID_CM, CM730::P_ACCEL_X_L, &_value, _arrd_length);
+		//		imu_linear_acceleration[0] = _value;
+		//		imu_data.linear_acceleration.x = lowPassFilter(filter_alpha, (imu_linear_acceleration[0] - 512) * G_ACC * 4.0 / 512.0 * _const, imu_data.linear_acceleration.x);
+		//		grp_handler->getReadData(CM730::ID_CM, CM730::P_ACCEL_Y_L, &_value, _arrd_length);
+		//		imu_linear_acceleration[1] = _value;
+		//		imu_data.linear_acceleration.y = lowPassFilter(filter_alpha, (imu_linear_acceleration[1] - 512) * G_ACC * 4.0 / 512.0 * _const, imu_data.linear_acceleration.y);
+		//		grp_handler->getReadData(CM730::ID_CM, CM730::P_ACCEL_Z_L, &_value, _arrd_length);
+		//		imu_linear_acceleration[2] = _value;
+		//		imu_data.linear_acceleration.z = lowPassFilter(filter_alpha, (imu_linear_acceleration[2] - 512) * G_ACC * 4.0 / 512.0 * _const, imu_data.linear_acceleration.z);
+		//		// ROS_INFO("linear_acceleration : %f, %f, %f", imu_linear_acceleration[0], imu_linear_acceleration[1], imu_linear_acceleration[2]);
+		//		// imu_data.linear_acceleration.y =  0.1*imu_data.linear_acceleration.y;
+		//		// imu_data.linear_acceleration.x =  0.1*imu_data.linear_acceleration.x;
+		//		// imu_data.linear_acceleration.z =  0.1*imu_data.linear_acceleration.z;
+		//
+		//		//Estimation of roll and pitch based on accelometer data, see http://theccontinuum.com/2012/09/24/arduino-imu-pitch-roll-from-accelerometer/
+		//		double sign = copysignf(1.0,  imu_data.linear_acceleration.z/G_ACC);
+		//		double roll = atan2( imu_data.linear_acceleration.y/G_ACC, sign * sqrt( imu_data.linear_acceleration.x/G_ACC* imu_data.linear_acceleration.x/G_ACC +  imu_data.linear_acceleration.z/G_ACC* imu_data.linear_acceleration.z/G_ACC));
+		//		double pitch = -atan2( imu_data.linear_acceleration.x/G_ACC, sqrt( imu_data.linear_acceleration.y/G_ACC* imu_data.linear_acceleration.y/G_ACC +  imu_data.linear_acceleration.z/G_ACC* imu_data.linear_acceleration.z/G_ACC));
+		//		double yaw = 0.0;
+		//
+		//		tf2::Quaternion imu_orient;
+		//		imu_orient.setRPY(roll, pitch, yaw);
+		//
+		//		imu_data.orientation.x = imu_orient.getX();
+		//		imu_data.orientation.y = imu_orient.getY();
+		//		imu_data.orientation.z = imu_orient.getZ();
+		//		imu_data.orientation.w = imu_orient.getW();
+
+		publish_imu(_imu_pub);
+		//publish_localization_tf();
+
 		ros::spinOnce();
 		_loop_hz.sleep();
 
-        ros::Time _now = ros::Time::now();
-        ros::Duration _dur = _now - _time;
 
-        // log
-        ROS_INFO_STREAM("loop_rate " << _dur << " | " << _msg_seq);
-        _time = _now;
 	}
 
 	ROS_INFO("Terminated ROS");

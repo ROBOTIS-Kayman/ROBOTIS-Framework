@@ -7,6 +7,7 @@ find_package(catkin REQUIRED COMPONENTS
   std_msgs
   message_generation
   nodelet
+  tf
 )
 
 find_package(Boost REQUIRED COMPONENTS thread system)
@@ -54,7 +55,7 @@ catkin_package(
   INCLUDE_DIRS include
   LIBRARIES robotis_controller
 #  CATKIN_DEPENDS roscpp sensor_msgs std_msgs
-  CATKIN_DEPENDS roscpp sensor_msgs std_msgs nodelet
+  CATKIN_DEPENDS roscpp sensor_msgs std_msgs nodelet tf
 #  DEPENDS system_lib
 )
 
